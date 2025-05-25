@@ -3,5 +3,3 @@ torch
 pandas
 opencv-python-headless
 Pillow
-numpy
-ultralytics
