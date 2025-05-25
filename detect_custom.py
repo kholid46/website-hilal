@@ -1,43 +1,58 @@
-
 import torch
 import pandas as pd
 from pathlib import Path
 from PIL import Image
+import cv2
+import numpy as np
+from yolov5.models.common import DetectMultiBackend
+from yolov5.utils.datasets import LoadImages
+from yolov5.utils.general import non_max_suppression, scale_coords
+from yolov5.utils.torch_utils import select_device
 
-def compress_image(image_path):
-    img = Image.open(image_path).convert("RGB")
-    img = img.resize((640, 640))
-    temp = image_path + "_resized.jpg"
-    img.save(temp, "JPEG")
-    return temp
+def run_detection(source):
+    device = select_device('')
+    model = DetectMultiBackend("best.pt", device=device, dnn=False)
+    stride, names = model.stride, model.names
 
-def run_detection(source_path):
-    model = torch.hub.load("ultralytics/yolov5", "custom", path="best.pt", force_reload=False)
-    model.conf = 0.25
+    dataset = LoadImages(source, img_size=640, stride=stride, auto=True)
+    results = []
+    result_img_path = None
 
-    img_path = compress_image(source_path)
-    results = model(img_path)
-    results.save()
+    for path, img, im0s, vid_cap, _ in dataset:
+        img = torch.from_numpy(img).to(device)
+        img = img.float() / 255.0
+        if img.ndimension() == 3:
+            img = img[None]
 
-    out_dir = Path("runs/detect")
-    latest = sorted(out_dir.glob("exp*"), key=lambda x: x.stat().st_mtime)[-1]
-    result_img = list(latest.glob("*.jpg"))[0]
+        pred = model(img)
+        pred = non_max_suppression(pred, conf_thres=0.25, iou_thres=0.45)[0]
 
-    data = []
-    for pred in results.pred:
+        im0 = im0s.copy()
+        data = []
         if pred is not None and len(pred):
-            for *box, conf, cls in pred.tolist():
+            pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0.shape).round()
+            for *xyxy, conf, cls in pred:
+                label = names[int(cls)]
+                x1, y1, x2, y2 = map(int, xyxy)
                 data.append({
-                    "label": model.names[int(cls)],
-                    "confidence": round(conf, 3),
-                    "xmin": round(box[0]),
-                    "ymin": round(box[1]),
-                    "xmax": round(box[2]),
-                    "ymax": round(box[3]),
+                    "label": label,
+                    "confidence": float(conf),
+                    "xmin": x1,
+                    "ymin": y1,
+                    "xmax": x2,
+                    "ymax": y2,
                 })
+                cv2.rectangle(im0, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                cv2.putText(im0, f"{label} {conf:.2f}", (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-    df = pd.DataFrame(data)
-    csv_path = latest / "hasil_deteksi.csv"
-    df.to_csv(csv_path, index=False)
+        out_path = Path("runs/detect/streamlit.jpg")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out_path), im0)
 
-    return str(result_img), str(csv_path), df
+        df = pd.DataFrame(data)
+        df_path = out_path.parent / "hasil_deteksi.csv"
+        df.to_csv(df_path, index=False)
+        result_img_path = str(out_path)
+
+    return result_img_path, str(df_path), df
