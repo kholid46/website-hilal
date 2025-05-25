@@ -4,6 +4,11 @@ from pathlib import Path
 from PIL import Image
 import cv2
 import numpy as np
+import sys
+sys.path.append('yolov5')
+
+from models.common import DetectMultiBackend
+
 from yolov5.models.common import DetectMultiBackend
 from yolov5.utils.datasets import LoadImages
 from yolov5.utils.general import non_max_suppression, scale_coords
